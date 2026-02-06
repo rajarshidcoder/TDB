@@ -3,56 +3,83 @@ version: '3.8'
 services:
   db:
     image: postgres:15-alpine
-    container_name: db
-    restart: always
+    container_name: hdfc_payment_db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: raja123
-      POSTGRES_DB: payments
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-payments}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - network
+      - payment_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
-    build: .
-    container_name: backend
-    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hdfc_payment_backend
+    restart: unless-stopped
     ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:raja123@db:5432/payments
+      - "${API_PORT:-8000}:8000"
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-payments}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
-      - network
+      - payment_network
     volumes:
-      - .:/app
+      - ./app:/app/app:ro
+      - ./alembic:/app/alembic:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        sleep 5 &&
+        echo 'Running database migrations...' &&
+        alembic upgrade head &&
+        echo 'Starting application...' &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000
+      "
 
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: pgadmin
-    restart: always
+    container_name: hdfc_payment_pgadmin
+    restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
     ports:
-      - "5050:80"
+      - "${PGADMIN_PORT:-5050}:80"
     depends_on:
       - db
     networks:
-      - network
+      - payment_network
     volumes:
       - pgadmin_data:/var/lib/pgadmin
 
 volumes:
   postgres_data:
+    driver: local
   pgadmin_data:
+    driver: local
 
 networks:
-  network:
+  payment_network:
     driver: bridge
