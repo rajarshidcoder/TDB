@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List
+from typing import List, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 
@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     return_url: str = Field(..., description="Payment return URL")
     
     # CORS Configuration
-    cors_origins: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8000"],
+    cors_origins: Union[str, List[str]] = Field(
+        default="http://localhost:3000,http://localhost:8000",
         description="Allowed CORS origins"
     )
     cors_allow_credentials: bool = Field(default=True, description="Allow credentials in CORS")
@@ -71,10 +71,13 @@ class Settings(BaseSettings):
     
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v):
+    def parse_cors_origins(cls, v) -> List[str]:
         """Parse CORS origins from comma-separated string or list"""
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
+            # Handle empty strings
+            if not v.strip():
+                return ["http://localhost:3000", "http://localhost:8000"]
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
     
     @property
